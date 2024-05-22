@@ -1,4 +1,4 @@
-from django.http import HttpResponseRedirect
+from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse, reverse_lazy
 from django.views.generic import (
@@ -6,8 +6,8 @@ from django.views.generic import (
     UpdateView, ListView, DeleteView
 )
 from django.views.generic.edit import FormMixin
-from django.contrib.auth import get_user_model
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth import get_user_model, logout
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from .models import Post, Category, Comment
 from .forms import CommentForm
 from django.db.models.functions import Now
@@ -38,11 +38,15 @@ class PostDetail(FormMixin, DetailView):
     template_name = 'blog/detail.html'
     success_url = reverse_lazy('blog:index')
     form_class = CommentForm
+    post_id_url_kwarg = 'post_id'
+
+    def get_object(self):
+        return get_object_or_404(Post.objects, id=self.kwargs.get('post_id'))
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["comments"] = Comment.objects.filter(
-            post=self.kwargs['pk']
+            post=self.kwargs[self.post_id_url_kwarg]
         ).order_by('created_at')
         return context
 
@@ -66,15 +70,23 @@ class PostCreate(LoginRequiredMixin, CreateView):
         )
 
 
-class PostEdit(UpdateView):
+class PostEdit(UserPassesTestMixin, UpdateView):
     model = Post
     fields = ('title', 'text', 'pub_date', 'location', 'category', 'image')
     template_name = 'blog/create.html'
+    post_id_url_kwarg = 'post_id'
+
+    def test_func(self):
+        username = Post.objects.filter(id=self.kwargs[self.post_id_url_kwarg]).values('author__username').first()
+        try:
+            return self.request.user.username == username.get('author__username')
+        except AttributeError:
+            raise Http404()
 
     def get_success_url(self):
         return reverse(
             'blog:post_detail',
-            kwargs={'pk': self.kwargs['pk']}
+            kwargs={'post_id': self.kwargs[self.post_id_url_kwarg]}
         )
 
 
@@ -82,18 +94,34 @@ class PostDelete(DeleteView):
     model = Post
     template_name = 'blog/create.html'
     success_url = reverse_lazy('blog:index')
+    post_id_url_kwarg = 'post_id'
+
+    def test_func(self):
+        username = Post.objects.filter(id=self.kwargs[self.post_id_url_kwarg]).values('author__username').first()
+        return self.request.user.username == username.get('author__username')
+
+    def get_success_url(self, **kwargs):
+        return reverse(
+            'blog:post_detail',
+            kwargs={'post_id': self.kwargs[self.post_id_url_kwarg]}
+        )
 
 
 class AddComment(LoginRequiredMixin, CreateView):
     model = Comment
     fields = ('text',)
     template_name = 'blog/comment.html'
-    success_url = reverse_lazy('blog:index')
+    post_id_url_kwarg = 'post_id'
+
+    def get_object(self):
+        return get_object_or_404(Post.objects, id=self.kwargs.get('post_id'))
 
     def form_valid(self, form, **kwargs):
         instance = form.save(commit=False)
         instance.author = self.request.user
-        instance.post = get_object_or_404(Post, id=self.kwargs['pk'])
+        instance.post = get_object_or_404(
+            Post, id=self.kwargs[self.post_id_url_kwarg]
+        )
         instance.save()
 
         return super().form_valid(form)
@@ -101,30 +129,58 @@ class AddComment(LoginRequiredMixin, CreateView):
     def get_success_url(self, **kwargs):
         return reverse(
             'blog:post_detail',
-            kwargs={'pk': self.kwargs['pk']}
+            kwargs={'post_id': self.kwargs[self.post_id_url_kwarg]}
         )
 
 
-class EditComment(UpdateView):
+class EditComment(UserPassesTestMixin, UpdateView):
     model = Comment
     fields = ('text',)
     template_name = 'blog/comment.html'
+    comment_id_url_kwarg = 'comment_id'
+
+    def get_object(self):
+        return get_object_or_404(
+            Comment, id=self.kwargs.get(self.comment_id_url_kwarg)
+        )
+
+    def test_func(self):
+        username = Comment.objects.filter(
+            id=self.kwargs[self.comment_id_url_kwarg]
+        ).values('author__username').first()
+        try:
+            return self.request.user.username == username.get('author__username')
+        except AttributeError:
+            raise Http404()
 
     def get_success_url(self, **kwargs):
         return reverse(
             'blog:post_detail',
-            kwargs={'pk': self.kwargs['post_pk']}
+            kwargs={'post_id': self.kwargs['post_id']}
         )
 
 
-class DeleteComment(DeleteView):
+class DeleteComment(UserPassesTestMixin, DeleteView):
     model = Comment
     template_name = 'blog/comment.html'
+    comment_id_url_kwarg = 'comment_id'
+
+    def get_object(self):
+        return get_object_or_404(
+            Comment, id=self.kwargs.get(self.comment_id_url_kwarg)
+        )
+
+    def test_func(self):
+        username = Comment.objects.filter(id=self.kwargs['comment_id']).values('author__username').first()
+        try:
+            return self.request.user.username == username.get('author__username')
+        except AttributeError:
+            raise Http404()
 
     def get_success_url(self, **kwargs):
         return reverse(
             'blog:post_detail',
-            kwargs={'pk': self.kwargs['post_pk']}
+            kwargs={'post_id': self.kwargs[self.comment_id_url_kwarg]}
         )
 
 
@@ -172,13 +228,35 @@ class Profile(ListView):
         return query_set
 
 
-class EditProfile(UpdateView):
+class EditProfile(UserPassesTestMixin, UpdateView):
     model = USER_MODEL
+    fields = (
+        'username',
+        'first_name',
+        'last_name',
+        'email',
+        'password',
+    )
     template_name = 'blog/user.html'
-    success_url = reverse_lazy('blog')
+    username_url_kwarg = 'username'
+
+    def get_object(self):
+        return get_object_or_404(USER_MODEL, username=self.kwargs.get(self.username_url_kwarg))
 
     def get_queryset(self):
         return get_object_or_404(
             USER_MODEL,
-            username=self.kwargs['username']
+            username=self.kwargs[self.username_url_kwarg]
+        )
+
+    def test_func(self):
+        try:
+            return self.request.user.username == self.kwargs[self.username_url_kwarg]
+        except AttributeError:
+            raise Http404()
+
+    def get_success_url(self, **kwargs):
+        return reverse(
+            'blog:profile',
+            kwargs={'username': self.kwargs[self.username_url_kwarg]}
         )
