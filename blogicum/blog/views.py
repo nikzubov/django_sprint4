@@ -13,7 +13,7 @@ from django.views.generic.edit import FormMixin
 from .forms import CommentForm, PostForm
 from .models import Category, Comment, Post
 
-userModel = get_user_model()
+UserModel = get_user_model()
 PAGINATION = 10
 
 
@@ -221,7 +221,7 @@ class Profile(ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['profile'] = get_object_or_404(
-            userModel,
+            UserModel,
             username=self.kwargs['username']
         )
         return context
@@ -236,7 +236,7 @@ class Profile(ListView):
 
 
 class EditProfile(UserPassesTestMixin, UpdateView):
-    model = userModel
+    model = UserModel
     fields = (
         'username',
         'first_name',
@@ -249,13 +249,13 @@ class EditProfile(UserPassesTestMixin, UpdateView):
 
     def get_object(self):
         return get_object_or_404(
-            userModel,
+            UserModel,
             username=self.kwargs.get(self.username_url_kwarg)
         )
 
     def get_queryset(self):
         return get_object_or_404(
-            userModel,
+            UserModel,
             username=self.kwargs.get(self.username_url_kwarg)
         )
 
